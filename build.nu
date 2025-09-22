@@ -21,6 +21,9 @@ buildah run $ctr chown -R www-data:www-data /var/www/html
 # Download Caddyfile from frankenwp GitHub repository
 buildah run $ctr curl -o /etc/caddy/Caddyfile https://raw.githubusercontent.com/dunglas/frankenwp/main/Caddyfile
 
+# Copy mu-plugins to the wp-content volume
+buildah copy $ctr wp-content/mu-plugins /var/www/html/wp-content/mu-plugins
+
 # Expose FrankenPHP default port
 buildah config --port 8080 $ctr
 
