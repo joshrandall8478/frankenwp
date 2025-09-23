@@ -1,36 +1,64 @@
 #!/usr/bin/env nu
 
 let image_name = "frankenwp"
-let ctr = buildah from dunglas/frankenphp:latest
+
+# TODO: Look into PHP 8.4 
+let php_version = "8.3"
+let wp_version = "latest"
+# let wp_version = "6.8.2-php8.3-fpm"
+
+
+let frankenphp_builder = buildah from $"dunglas/frankenphp:latest-builder-php($php_version)"
+let caddy_builder = buildah from caddy/caddy:builder
+let wp = buildah from $"wordpress:($wp_version)"
 
 # Set working dir
-buildah config --workingdir /var/www/html $ctr
+buildah config --workingdir /var/www/html $frankenphp_builder
+
+# TODO: fix this
+# Copy xcaddy
+buildah copy --from $caddy_builder $frankenphp_builder /usr/bin/xcaddy /usr/bin/xcaddy
+
+return
+
+# Build xcaddy
+buildah run $frankenphp_builder 'xcaddy build --output /usr/local/bin/frankenphp --with github.com/dunglas/frankenphp=./ --with github.com/dunglas/frankenphp/caddy=./caddy/ --with github.com/dunglas/caddy-cbrotli --with github.com/stephenmiracle/frankenwp/sidekick/middleware/cache=./cache'
+
+
+# CGO must be enabled to build FrankenPHP
+buildah config --env CGO_ENABLED=1 $frankenphp_builder
+buildah config --env XCADDY_SETCAP=1 $frankenphp_builder
+buildah config --env XCADDY_GO_BUILD_FLAGS='-ldflags="-w -s" -trimpath' $frankenphp_builder
 
 # Install deps
-buildah run $ctr apt-get update
-buildah run $ctr apt-get install -y curl tar ca-certificates
+buildah run $frankenphp_builder apt-get update
+buildah run $frankenphp_builder apt-get install -y curl tar ca-certificates libxml2-dev
 
-# Get WordPress
-buildah run $ctr bash -c "curl -o wordpress.tar.gz https://wordpress.org/latest.tar.gz"
-buildah run $ctr tar -xzf wordpress.tar.gz --strip-components=1
-buildah run $ctr rm wordpress.tar.gz
+
 
 # Permissions
-buildah run $ctr chown -R www-data:www-data /var/www/html
+buildah run $frankenphp_builder chown -R www-data:www-data /var/www/html
 
 # Download Caddyfile from frankenwp GitHub repository
-buildah run $ctr curl -o /etc/caddy/Caddyfile https://raw.githubusercontent.com/dunglas/frankenwp/main/Caddyfile
+buildah run $frankenphp_builder curl -o /etc/caddy/Caddyfile https://raw.githubusercontent.com/dunglas/frankenwp/main/Caddyfile
 
 # Copy mu-plugins to the wp-content volume
-buildah copy $ctr wp-content/mu-plugins /var/www/html/wp-content/mu-plugins
+buildah copy $frankenphp_builder wp-content/mu-plugins /var/www/html/wp-content/mu-plugins
+
+# Add mysql
+buildah run $frankenphp_builder docker-php-ext-install pdo pdo_mysql soap
+
+
+# Install required PHP extensions for WordPress
+buildah run $frankenphp_builder install-php-extensions bcmath exif gd intl mysqli zip imagick/imagick@master opcache
 
 # Expose FrankenPHP default port
-buildah config --port 8080 $ctr
+buildah config --port 8080 $frankenphp_builder
 
 # Entrypoint/command
-buildah config --cmd '["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]' $ctr
+buildah config --cmd '["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]' $frankenphp_builder
 
 # Commit the image
-buildah commit $ctr $"docker-daemon:($image_name):custom"
+buildah commit $frankenphp_builder $"docker-daemon:($image_name):custom"
 
 echo $"✅ Image ($image_name) built successfully"
