@@ -56,49 +56,69 @@ def check_sysctl []: nothing -> nothing {
 }
 
 def build-image [] {
+	use std log
 	let image_name = "frankenwp"
 
 	# TODO: Look into PHP 8.4 
-	let php_version = "8.3"
+	let php_version = "8.4"
 	let wp_version = "latest"
 	# let wp_version = "6.8.2-php8.3-fpm"
 
 
-	let frankenphp_builder = buildah from $"docker.io/dunglas/frankenphp:latest-builder-php($php_version)"
+	let frankenphp_builder = buildah from $"docker.io/dunglas/frankenphp:builder-php($php_version)"
 	let caddy_builder = buildah from docker.io/caddy:builder
 	let wp = buildah from $"docker.io/wordpress:($wp_version)"
 
+	let caddy_mnt = (buildah mount $caddy_builder)
+	let frankenphp_mnt = (buildah mount $frankenphp_builder)
+
+	mkdir $"($frankenphp_mnt)/build"
+	mkdir $"($frankenphp_mnt)/build/cache"
+	mkdir $"($frankenphp_mnt)/build/caddy"
+
 	# Set working dir
-	buildah config --workingdir /var/www/html $frankenphp_builder
+	buildah config --workingdir /build $frankenphp_builder
 
 	# TODO: fix this
 	# Copy xcaddy
 
-	mkdir /tmp/caddy_builder /tmp/frankenphp_builder
+	# mkdir /tmp/caddy_builder /tmp/frankenphp_builder
 
-	let caddymnt = (buildah mount $caddy_builder)
-	let frankenphpmnt = (buildah mount $frankenphp_builder)
-
-    # print (ls $"($caddymnt)/usr/bin")
-    # print (ls $frankenphpmnt)
-	print $"caddymnt: ($caddymnt)"
-	print $"frankenphpmnt: ($frankenphpmnt)"
+    # print (ls $"($caddy_mnt)/usr/bin")
+    # print (ls $frankenphp_mnt)
+	print $"caddy_mnt: ($caddy_mnt)"
+	print $"frankenphp_mnt: ($frankenphp_mnt)"
 
 	# "path join" does not handle joining mounted directories. Join the directories as a string.
-    print ([$caddymnt, "/usr/bin/"] | path join)
-    print $"($caddymnt)/usr/bin/"
-    # print (ls $"($caddymnt)/usr/bin/")
+    print ([$caddy_mnt, "/usr/bin/"] | path join)
+    print $"($caddy_mnt)/usr/bin/"
+    # print (ls $"($caddy_mnt)/usr/bin/")
     #  print (glob $"([$caddy_builder, "/usr/bin/"] | path join)/x*")
 
+	cp $"($caddy_mnt)/usr/bin/xcaddy" $"($frankenphp_mnt)/usr/bin/"
 
-	cp $"($caddymnt)/usr/bin/xcaddy" $"($frankenphpmnt)/usr/bin/"
+    # print (ls -l $"($frankenphp_mnt)/usr/bin/xcaddy")
 
-    print (ls -l $"($frankenphpmnt)/usr/bin/xcaddy")
+	# Copy cache middleware into the build directory
+	cp -r ./sidekick/middleware/cache $"($frankenphp_mnt)/build/cache"
+
+	# Build xcaddy in the build directory
+	# buildah run $frankenphp_builder 'ls .'
+	# return
+	let build_cmd =  [
+		"/usr/bin/xcaddy build",
+		"--output /usr/local/bin/frankenphp",
+		"--with github.com/dunglas/frankenphp=/build/",
+		"--with github.com/dunglas/frankenphp/caddy=/build/caddy/",
+		"--with github.com/dunglas/caddy-cbrotli",
+		"--with github.com/stephenmiracle/frankenwp/sidekick/middleware/cache=/build/cache"
+	] | str join ' '
 
 
-    cp -r ./sidekick/middleware/cache $"($frankenphpmnt)/var/www/html"
-	# Build xcaddy
-	buildah run $frankenphp_builder 'xcaddy build --output /usr/local/bin/frankenphp --with github.com/dunglas/frankenphp=./ --with github.com/dunglas/frankenphp/caddy=./caddy/ --with github.com/dunglas/caddy-cbrotli --with github.com/stephenmiracle/frankenwp/sidekick/middleware/cache=./cache'
+	# buildah run $frankenphp_builder -- sh -c 'go version'
+	buildah run $frankenphp_builder -- sh -c $build_cmd
+	log info "xcaddy built"
+	return
 
 
 	# CGO must be enabled to build FrankenPHP
