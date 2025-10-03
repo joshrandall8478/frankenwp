@@ -65,15 +65,14 @@ def build-image [] {
 	# let wp_version = "6.8.2-php8.3-fpm"
 
 
-	let frankenphp_builder = buildah from $"docker.io/dunglas/frankenphp:builder-php($php_version)"
-	let caddy_builder = buildah from docker.io/caddy:builder
-	let wp = buildah from $"docker.io/wordpress:($wp_version)"
+	let frankenphp_builder = (^buildah from $"docker.io/dunglas/frankenphp:builder-php($php_version)")
+	let caddy_builder = (^buildah from docker.io/caddy:builder)
+	let wp = (^buildah from $"docker.io/wordpress:($wp_version)")
 
-	let caddy_mnt = (buildah mount $caddy_builder)
-	let frankenphp_mnt = (buildah mount $frankenphp_builder)
+	let caddy_mnt = (^buildah mount $caddy_builder)
+	let frankenphp_mnt = (^buildah mount $frankenphp_builder)
 
 	mkdir $"($frankenphp_mnt)/build"
-	mkdir $"($frankenphp_mnt)/build/cache"
 	mkdir $"($frankenphp_mnt)/build/caddy"
 
 	# Set working dir
@@ -100,31 +99,64 @@ def build-image [] {
     # print (ls -l $"($frankenphp_mnt)/usr/bin/xcaddy")
 
 	# Copy cache middleware into the build directory
-	cp -r ./sidekick/middleware/cache $"($frankenphp_mnt)/build/cache"
+	cp -r ./sidekick/middleware/cache $"($frankenphp_mnt)/build/"
 
 	# Build xcaddy in the build directory
 	# buildah run $frankenphp_builder 'ls .'
 	# return
-	let build_cmd =  [
-		"/usr/bin/xcaddy build",
-		"--output /usr/local/bin/frankenphp",
-		"--with github.com/dunglas/frankenphp=/build/",
-		"--with github.com/dunglas/frankenphp/caddy=/build/caddy/",
-		"--with github.com/dunglas/caddy-cbrotli",
-		"--with github.com/stephenmiracle/frankenwp/sidekick/middleware/cache=/build/cache"
-	] | str join ' '
+	# let build_cmd =  [
+	# 	/usr/bin/xcaddy build
+	# 	--output /usr/local/bin/frankenphp
+	# 	# --with github.com/dunglas/frankenphp=/build/
+	# 	--with github.com/dunglas/frankenphp/caddy=/build/caddy/
+	# 	--with github.com/dunglas/caddy-cbrotli
+	# 	--with github.com/stephenmiracle/frankenwp/sidekick/middleware/cache=/build/cache
+	# ]
+	let build_cmd = [
+		/usr/bin/xcaddy build
+		--output /usr/local/bin/frankenphp
+		# --with github.com/dunglas/frankenphp=/build/
+		--with github.com/dunglas/frankenphp/caddy
+		--with github.com/dunglas/caddy-cbrotli
+		--with github.com/stephenmiracle/frankenwp/sidekick/middleware/cache=/build/cache
+	]
+	# let build_cmd =  [
+	# 	ls -l /build /build/caddy /build/cache
+	# ]
+	let php_includes = (^buildah run $frankenphp_builder php-config --includes)
+	let php_ldflags = (^buildah run $frankenphp_builder php-config --ldflags)
+	let php_libs = (^buildah run $frankenphp_builder php-config --libs)
+	let env_args = [
+		# Both
+		--env CGO_ENABLED=1
+		--env XCADDY_SETCAP=1
 
+		# frankenwp
+		# https://github.com/StephenMiracle/frankenwp/blob/main/Dockerfile#L14
+		# --env XCADDY_GO_BUILD_FLAGS='-ldflags="-w -s" -trimpath'
+
+		# FrankenPHP
+		# https://frankenphp.dev/docs/docker/#how-to-install-more-caddy-modules
+		--env `XCADDY_GO_BUILD_FLAGS=-ldflags='-w -s' -tags=nobadger,nomysql,nopgx`
+		--env $"CGO_CFLAGS=($php_includes)"
+		--env $"CGO_LDFLAGS=($php_ldflags) ($php_libs)"
+	]
+
+	# frankenwp and Docker PHP uses `install-php-extensions` to build the PHP extensions.
+	# FrankenPHP uses `php-config` to build the PHP extensions. See https://frankenphp.dev/docs/static/#extensions
 
 	# buildah run $frankenphp_builder -- sh -c 'go version'
-	buildah run $frankenphp_builder -- sh -c $build_cmd
+	# buildah run $frankenphp_builder -- sh -c $build_cmd
+	print $"^buildah run --workingdir /build ...($env_args) ($frankenphp_builder) -- ...$build_cmd"
+	^buildah run --workingdir /build ...$env_args $frankenphp_builder -- ...$build_cmd
 	log info "xcaddy built"
 	return
 
 
-	# CGO must be enabled to build FrankenPHP
-	buildah config --env CGO_ENABLED=1 $frankenphp_builder
-	buildah config --env XCADDY_SETCAP=1 $frankenphp_builder
-	buildah config --env XCADDY_GO_BUILD_FLAGS='-ldflags="-w -s" -trimpath' $frankenphp_builder
+	# # CGO must be enabled to build FrankenPHP
+	# buildah config --env CGO_ENABLED=1 $frankenphp_builder
+	# buildah config --env XCADDY_SETCAP=1 $frankenphp_builder
+	# buildah config --env XCADDY_GO_BUILD_FLAGS='-ldflags="-w -s" -trimpath' $frankenphp_builder
 
 	# Install deps
 	buildah run $frankenphp_builder apt-get update
