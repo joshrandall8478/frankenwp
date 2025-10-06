@@ -150,7 +150,6 @@ def build-image [] {
 	print $"^buildah run --workingdir /build ...($env_args) ($frankenphp_builder) -- ...$build_cmd"
 	^buildah run --workingdir /build ...$env_args $frankenphp_builder -- ...$build_cmd
 	log info "xcaddy built"
-	return
 
 
 	# # CGO must be enabled to build FrankenPHP
