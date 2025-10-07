@@ -161,7 +161,57 @@ def build-image [] {
 	buildah run $frankenphp_builder apt-get update
 	buildah run $frankenphp_builder apt-get install -y curl tar ca-certificates libxml2-dev
 
+		# Install system dependencies required for PHP extensions
+	buildah run $frankenphp_builder apt-get update
+	buildah run $frankenphp_builder apt-get install -y libjpeg-dev libpng-dev libwebp-dev libfreetype6-dev libzip-dev libicu-dev libmagickwand-dev
 
+	# Install required PHP extensions for WordPress
+	buildah run $frankenphp_builder install-php-extensions bcmath exif gd intl mysqli zip imagick/imagick@master opcache
+
+	# Increase PHP memory limit to avoid memory exhaustion with wp-cli
+	buildah run $frankenphp_builder sh -c 'echo "memory_limit = 512M" > /usr/local/etc/php/conf.d/99-memory-limit.ini'
+
+	# # Copy php.ini-production to php.ini
+	# buildah run $frankenphp_builder cp $env.PHP_INI_DIR/php.ini-production $env.PHP_INI_DIR/php.ini
+
+	# # Copy custom php.ini (assumes php.ini exists in your build context)
+	# buildah copy $frankenphp_builder php.ini $env.PHP_INI_DIR/conf.d/wp.ini
+
+	# Copy WordPress source from wp image
+	buildah copy --from $wp $frankenphp_builder /usr/src/wordpress /usr/src/wordpress
+
+	# Copy PHP conf.d from wp image
+	buildah copy --from $wp $frankenphp_builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d/
+
+	# Copy docker-entrypoint.sh from wp image
+	buildah copy --from $wp $frankenphp_builder /usr/local/bin/docker-entrypoint.sh /usr/local/bin/
+
+
+	# Add $_SERVER['ssl'] = true; when env USE_SSL = true is set to the wp-config.php file here: /usr/local/bin/wp-config-docker.php
+	buildah run $frankenphp_builder sed -i 's/<?php/<?php if (!!getenv("FORCE_HTTPS")) { $_SERVER["HTTPS"] = "on"; } define( "FS_METHOD", "direct" ); set_time_limit(300); /g' /usr/src/wordpress/wp-config-docker.php
+
+	# Adding WordPress CLI
+	buildah run $frankenphp_builder curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+	buildah run $frankenphp_builder chmod +x wp-cli.phar
+	buildah run $frankenphp_builder mv wp-cli.phar /usr/local/bin/wp
+
+	# Initialize WordPress in /var/www/html
+	buildah run $frankenphp_builder wp core download --path=/var/www/html --allow-root
+	# Create wp-config.php using wp-cli
+	buildah run $frankenphp_builder wp config create --path=/var/www/html --dbname=wordpress --dbuser=wordpress --dbpass=wordpress --dbhost=localhost --skip-check --allow-root
+
+	# Install MySQL server and mysqld_safe
+	buildah run $frankenphp_builder apt-get update
+	buildah run $frankenphp_builder apt-get install -y mariadb-server mariadb-client mariadb-common
+
+	# Initialize MySQL data directory
+	buildah run $frankenphp_builder bash -c 'mysqld --user=mysql --datadir=/var/lib/mysql'
+
+	# Start MySQL server in the background for setup
+	buildah run $frankenphp_builder bash -c 'mysqld_safe --datadir=/var/lib/mysql & sleep 10 && mysql -u root -e "CREATE DATABASE IF NOT EXISTS wordpress; CREATE USER IF NOT EXISTS '\''wordpress'\''@'\''localhost'\'' IDENTIFIED BY '\''wordpress'\''; GRANT ALL PRIVILEGES ON wordpress.* TO '\''wordpress'\''@'\''localhost'\''; FLUSH PRIVILEGES;"'
+
+	# Install WordPress using WP-CLI
+	buildah run $frankenphp_builder wp core install --path=/var/www/html --url="http://localhost" --title="FrankenWP" --admin_user="admin" --admin_password="password" --admin_email="admin@example.com" --skip-email --allow-root
 
 	# Permissions
 	buildah run $frankenphp_builder chown -R www-data:www-data /var/www/html
@@ -170,14 +220,12 @@ def build-image [] {
 	buildah run $frankenphp_builder curl -o /etc/caddy/Caddyfile https://raw.githubusercontent.com/dunglas/frankenwp/main/Caddyfile
 
 	# Copy mu-plugins to the wp-content volume
-	buildah copy $frankenphp_builder wp-content/mu-plugins /var/www/html/wp-content/mu-plugins
+	# buildah copy $frankenphp_builder wp-content/mu-plugins /var/www/html/wp-content/mu-plugins
 
 	# Add mysql
 	buildah run $frankenphp_builder docker-php-ext-install pdo pdo_mysql soap
 
 
-	# Install required PHP extensions for WordPress
-	buildah run $frankenphp_builder install-php-extensions bcmath exif gd intl mysqli zip imagick/imagick@master opcache
 
 	# Expose FrankenPHP default port
 	buildah config --port 8080 $frankenphp_builder
