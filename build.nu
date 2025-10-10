@@ -188,33 +188,33 @@ def build-image [] {
 
 
 	# Add $_SERVER['ssl'] = true; when env USE_SSL = true is set to the wp-config.php file here: /usr/local/bin/wp-config-docker.php
-	buildah run $frankenphp_builder sed -i 's/<?php/<?php if (!!getenv("FORCE_HTTPS")) { $_SERVER["HTTPS"] = "on"; } define( "FS_METHOD", "direct" ); set_time_limit(300); /g' /usr/src/wordpress/wp-config-docker.php
+	# buildah run $frankenphp_builder sed -i 's/<?php/<?php if (!!getenv("FORCE_HTTPS")) { $_SERVER["HTTPS"] = "on"; } define( "FS_METHOD", "direct" ); set_time_limit(300); /g' /usr/src/wordpress/wp-config-docker.php
 
-	# Adding WordPress CLI
-	buildah run $frankenphp_builder curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-	buildah run $frankenphp_builder chmod +x wp-cli.phar
-	buildah run $frankenphp_builder mv wp-cli.phar /usr/local/bin/wp
+	# # Adding WordPress CLI
+	# buildah run $frankenphp_builder curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+	# buildah run $frankenphp_builder chmod +x wp-cli.phar
+	# buildah run $frankenphp_builder mv wp-cli.phar /usr/local/bin/wp
 
-	# Initialize WordPress in /var/www/html
-	buildah run $frankenphp_builder wp core download --path=/var/www/html --allow-root
-	# Create wp-config.php using wp-cli
-	buildah run $frankenphp_builder wp config create --path=/var/www/html --dbname=wordpress --dbuser=wordpress --dbpass=wordpress --dbhost=localhost --skip-check --allow-root
+	# # Initialize WordPress in /var/www/html
+	# buildah run $frankenphp_builder wp core download --path=/var/www/html --allow-root
+	# # Create wp-config.php using wp-cli
+	# buildah run $frankenphp_builder wp config create --path=/var/www/html --dbname=wordpress --dbuser=wordpress --dbpass=wordpress --dbhost=localhost --skip-check --allow-root
 
-	# Install MySQL server and mysqld_safe
-	buildah run $frankenphp_builder apt-get update
-	buildah run $frankenphp_builder apt-get install -y mariadb-server mariadb-client mariadb-common
+	# # Install MySQL server and mysqld_safe
+	# buildah run $frankenphp_builder apt-get update
+	# buildah run $frankenphp_builder apt-get install -y mariadb-server mariadb-client mariadb-common
 
-	# Initialize MySQL data directory
-	buildah run $frankenphp_builder bash -c 'mysqld --user=mysql --datadir=/var/lib/mysql'
+	# # Initialize MySQL data directory
+	# buildah run $frankenphp_builder bash -c 'mysqld --user=mysql --datadir=/var/lib/mysql'
 
-	# Start MySQL server in the background for setup
-	buildah run $frankenphp_builder bash -c 'mysqld_safe --datadir=/var/lib/mysql & sleep 10 && mysql -u root -e "CREATE DATABASE IF NOT EXISTS wordpress; CREATE USER IF NOT EXISTS '\''wordpress'\''@'\''localhost'\'' IDENTIFIED BY '\''wordpress'\''; GRANT ALL PRIVILEGES ON wordpress.* TO '\''wordpress'\''@'\''localhost'\''; FLUSH PRIVILEGES;"'
+	# # Start MySQL server in the background for setup
+	# buildah run $frankenphp_builder bash -c 'mysqld_safe --datadir=/var/lib/mysql & sleep 10 && mysql -u root -e "CREATE DATABASE IF NOT EXISTS wordpress; CREATE USER IF NOT EXISTS '\''wordpress'\''@'\''localhost'\'' IDENTIFIED BY '\''wordpress'\''; GRANT ALL PRIVILEGES ON wordpress.* TO '\''wordpress'\''@'\''localhost'\''; FLUSH PRIVILEGES;"'
 
-	# Install WordPress using WP-CLI
-	buildah run $frankenphp_builder wp core install --path=/var/www/html --url="http://localhost" --title="FrankenWP" --admin_user="admin" --admin_password="password" --admin_email="admin@example.com" --skip-email --allow-root
+	# # Install WordPress using WP-CLI
+	# buildah run $frankenphp_builder wp core install --path=/var/www/html --url="http://localhost" --title="FrankenWP" --admin_user="admin" --admin_password="password" --admin_email="admin@example.com" --skip-email --allow-root
 
-	# Permissions
-	buildah run $frankenphp_builder chown -R www-data:www-data /var/www/html
+	# # Permissions
+	# buildah run $frankenphp_builder chown -R www-data:www-data /var/www/html
 
 	# Download Caddyfile from frankenwp GitHub repository
 	buildah run $frankenphp_builder curl -o /etc/caddy/Caddyfile https://raw.githubusercontent.com/dunglas/frankenwp/main/Caddyfile
